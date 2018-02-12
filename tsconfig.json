@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "preserveConstEnums": true,
+    "allowUnreachableCode": true,
+    "declaration": true,
+    "outDir": "lib",
+    "removeComments": false,
+    "strict": true,
+    "strictNullChecks": false,
+    "target": "es2017",
+    "experimentalDecorators": true,
+    "sourceMap": true,
+    "moduleResolution": "node"
+  },
+  "include": [
+      "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "lib",
+    "test"
+  ]
+}
