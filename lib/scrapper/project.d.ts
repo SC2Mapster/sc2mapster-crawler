@@ -77,3 +77,18 @@ export declare class ProjectFileScrapper extends ScrapperBase {
     constructor();
     process($: CheerioStatic): ProjectFile;
 }
+export declare type ForumPost = {
+    date: Date;
+    author: Member;
+    content: WysiwygContent;
+};
+export declare type ForumThread = {
+    url: string;
+    title: string;
+    posts: ForumPost[];
+    categoryBreadcrumb: string[];
+};
+export declare class ForumThreadScrapper extends ScrapperBase {
+    constructor();
+    process($: CheerioStatic): ForumThread;
+}
