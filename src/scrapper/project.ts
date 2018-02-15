@@ -58,9 +58,16 @@ function parseDate($el: Cheerio) {
 
 function parseMember($el: Cheerio) {
     const m = <Member>{};
-    const $username = $el.hasClass('user-tag-large') ? $el.find('.info-wrapper a') : $el.find('>a');
+    let $username: Cheerio;
+    if ($el.hasClass('p-comment-user')) {
+        $username = $el.find('.p-comment-username a')
+        m.title = $username.find('span.user').text().trim();
+    }
+    else {
+        $username = $el.hasClass('user-tag-large') ? $el.find('.info-wrapper a') : $el.find('>a');
+        m.title = $username.text().trim();
+    }
     m.name = $username.attr('href').match(/^\/members\/([\w-]+)$/i)[1];
-    m.title = $username.text().trim();
     const $avatar = $el.find('.avatar');
     if ($avatar) {
         m.profileThumbUrl = $avatar.find('img').attr('src');
@@ -261,5 +268,60 @@ export class ProjectFileScrapper extends ScrapperBase {
         pfile.uploadedBy = parseMember(detailsMap.get('Uploaded by').find('.user-tag'));
         pfile.description = parseWysiwygContent($('.details-content .details-changelog .logbox'));
         return pfile;
+    }
+}
+
+// 
+// 
+
+export type ForumPost = {
+    date: Date;
+    author: Member;
+    content: WysiwygContent;
+};
+
+function parseForumPost($: Cheerio) {
+    const post = <ForumPost>{};
+    post.date = parseDate($.find('.p-comment-postdate'));
+    post.content = parseWysiwygContent($.find('.forum-post-body'));
+    post.author = parseMember($.find('.p-comment-user'));
+    return post;
+}
+
+export type ForumThread = {
+    url: string;
+    title: string;
+    posts: ForumPost[];
+    categoryBreadcrumb: string[];
+};
+
+export class ForumThreadScrapper extends ScrapperBase {
+    constructor() {
+        super({
+            pathRegex: null,
+        });
+    }
+
+    public process($: CheerioStatic) {
+        const fthread = <ForumThread>{
+            posts: [],
+            categoryBreadcrumb: [],
+        };
+        fthread.title = $('.p-forum .caption-threads h2').text().trim();
+        
+        const $posts = $('.p-forum .p-comment-post.forum-post');
+        $posts.each((index) => {
+            fthread.posts.push(parseForumPost($posts.eq(index)));
+        });
+
+        const $cbreadcrumbs = $('.primary-content >.b-breadcrumb ul >li:not(:last-child)');
+        $cbreadcrumbs.each((index) => {
+            if (index < 2) return;
+            fthread.categoryBreadcrumb.push($cbreadcrumbs.eq(index).find('span').text());
+        });
+
+        // $('.b-pagination-list a:not([data-next-page])')
+
+        return fthread;
     }
 }

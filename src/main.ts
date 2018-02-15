@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import * as request from 'request-promise';
-import { ProjectOverview, ProjectOverviewScrapper, ProjectFilelistScrapper, ProjectFileScrapper, ProjectListItemScrapper, ProjectFile } from './scrapper/project';
+import * as url from 'url';
+import { ProjectOverview, ProjectOverviewScrapper, ProjectFilelistScrapper, ProjectFileScrapper, ProjectListItemScrapper, ProjectFile, ForumPost, ForumThread, ForumThreadScrapper } from './scrapper/project';
 
 export async function get(p: string) {
     return <CheerioStatic>await request.get('https://www.sc2mapster.com' + p, {
@@ -47,4 +48,11 @@ export async function getLatestProjects(rootCategory: 'maps' | 'assets', since?:
     return results;
 }
 
-export { ProjectOverview, ProjectFile } from './scrapper/project';
+export async function getForumThread(threadUrl: string) {
+    const uinfo = url.parse(threadUrl);
+    const r = (new ForumThreadScrapper()).process(await get(uinfo.path));
+    r.url = threadUrl;
+    return r;
+}
+
+export { ProjectOverview, ProjectFile, ForumThread, ForumPost } from './scrapper/project';

@@ -1,17 +1,17 @@
 {
   "name": "sc2mapster-crawler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "",
   "author": {
     "name": "Talv",
     "url": "https://github.com/Talv"
   },
   "bugs": {
-    "url": "https://github.com/Talv/sc2mapster-crawler/issues"
+    "url": "https://github.com/SC2Mapster/sc2mapster-crawler/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Talv/sc2mapster-crawler.git"
+    "url": "https://github.com/SC2Mapster/sc2mapster-crawler.git"
   },
   "license": "MIT",
   "main": "lib/main.js",
