@@ -37,13 +37,16 @@ export declare type ProjectCategory = {
     name: string;
     thumbnail: string;
 };
-export declare type ProjectOverview = {
-    id: number;
+export declare type ProjectBasicInfo = {
     name: string;
     title: string;
     rootCategory: string;
     image?: string;
     thumbnail?: string;
+};
+export declare type ProjectOverview = {
+    id: number;
+    base: ProjectBasicInfo;
     categories: ProjectCategory[];
     description: WysiwygContent;
     createdAt: Date;
@@ -66,7 +69,7 @@ export declare class ProjectFilelistScrapper extends ScrapperBase {
     process($: CheerioStatic): ProjectFileItem[];
 }
 export declare type ProjectFile = ProjectFileItem & {
-    projectName: string;
+    base: ProjectBasicInfo;
     filename: string;
     downloads: number;
     size: string;
@@ -76,6 +79,20 @@ export declare type ProjectFile = ProjectFileItem & {
 export declare class ProjectFileScrapper extends ScrapperBase {
     constructor();
     process($: CheerioStatic): ProjectFile;
+}
+export declare type ProjectImageItem = {
+    label: string;
+    caption: string;
+    imageUrl: string;
+    thumbnailUrl: string;
+};
+export declare type ProjectImagePage = {
+    base: ProjectBasicInfo;
+    images: ProjectImageItem[];
+};
+export declare class ProjectImageScrapper extends ScrapperBase {
+    constructor();
+    process($: CheerioStatic): ProjectImagePage;
 }
 export declare type ForumPost = {
     date: Date;
