@@ -1,7 +1,8 @@
 import * as cheerio from 'cheerio';
 import * as request from 'request-promise';
 import * as url from 'url';
-import { ProjectOverview, ProjectOverviewScrapper, ProjectFilelistScrapper, ProjectFileScrapper, ProjectListItemScrapper, ProjectFile, ForumPost, ForumThread, ForumThreadScrapper } from './scrapper/project';
+import { ProjectOverview, ProjectOverviewScrapper, ProjectFilelistScrapper, ProjectFileScrapper, ProjectListItemScrapper, ProjectFile, ForumPost, ForumThread, ForumThreadScrapper, ProjectImageScrapper, ProjectImageItem } from './scrapper/project';
+import * as stringSimilarity from 'string-similarity';
 
 export async function get(p: string) {
     return <CheerioStatic>await request.get('https://www.sc2mapster.com' + p, {
@@ -48,6 +49,23 @@ export async function getLatestProjects(rootCategory: 'maps' | 'assets', since?:
     return results;
 }
 
+export async function getProjectImages(projectName: string) {
+    return (new ProjectImageScrapper()).process(await get(`/projects/${projectName}/images`));
+}
+
+export function findMatchingFileImage(label: string, images: ProjectImageItem[]) {
+    const imMap = new Map<string, ProjectImageItem>();
+    images.forEach((value => {
+        imMap.set(value.label, value);
+    }));
+
+    const match = stringSimilarity.findBestMatch(label, Array.from(imMap.keys()));
+
+    if (match.bestMatch.rating < 0.6) return null;
+
+    return imMap.get(match.bestMatch.target);
+}
+
 export async function getForumThread(threadUrl: string) {
     const uinfo = url.parse(threadUrl);
     const r = (new ForumThreadScrapper()).process(await get(uinfo.path));
@@ -55,4 +73,4 @@ export async function getForumThread(threadUrl: string) {
     return r;
 }
 
-export { ProjectOverview, ProjectFile, ForumThread, ForumPost } from './scrapper/project';
+export { ProjectOverview, ProjectFile, ProjectImagePage, ForumThread, ForumPost } from './scrapper/project';

@@ -11,11 +11,11 @@ export type ScrapperOptions = {
 
 export abstract class ScrapperBase {
     protected options: ScrapperOptions;
-    
+
     constructor(options: ScrapperOptions) {
         this.options = options;
     }
-    
+
     public matchUrl(url: string) {
         const base = /^https?:\/\/(?:www\.)?sc2mapster\.com(\/?.*)$/;
         const r = base.exec(url);
@@ -24,8 +24,8 @@ export abstract class ScrapperBase {
     }
 }
 
-// 
-// 
+//
+//
 
 export type WysiwygContent = {
     html: string;
@@ -84,7 +84,9 @@ function parseMemberWithRole($el: Cheerio) {
 export function parseEmbeddedImages($el: Cheerio): string[] {
     const l = <string[]>[];
     $el.find('img[src]').each((index, el) => {
-        l.push(el.attribs['src']);
+        const src = el.attribs['src'];
+        if (/^https?:\/\/(?:www\.)?sc2mapster\.com\/thumbman\//.exec(src)) return;
+        l.push(src);
     });
     return l;
 }
@@ -97,8 +99,8 @@ export function parseWysiwygContent($el: Cheerio) {
     return cnt;
 }
 
-// 
-// 
+//
+//
 
 export type ProjectListItem = {
     name: string;
@@ -129,21 +131,25 @@ export class ProjectListItemScrapper extends ScrapperBase {
     }
 }
 
-// 
-// 
+//
+//
 
 export type ProjectCategory = {
     name: string;
     thumbnail: string;
 };
 
-export type ProjectOverview = {
-    id: number;
+export type ProjectBasicInfo = {
     name: string;
     title: string;
     rootCategory: string;
     image?: string;
     thumbnail?: string;
+};
+
+export type ProjectOverview = {
+    id: number;
+    base: ProjectBasicInfo;
     categories: ProjectCategory[];
     description: WysiwygContent;
     createdAt: Date;
@@ -153,6 +159,20 @@ export type ProjectOverview = {
     members: MemberWithRole[];
 };
 
+function parseProjectBasic($: Cheerio) {
+    const pinfo = <ProjectBasicInfo>{};
+    pinfo.title = $.find('h1.project-title').text().trim();
+    pinfo.name = $.find('h1.project-title a').attr('href').match(/^\/projects\/([\w-]+)$/i)[1];
+    pinfo.rootCategory = $.find('h2.RootGameCategory a').text().trim();
+
+    const $projectAvatar = $.find('.avatar-wrapper a');
+    if ($projectAvatar.length) {
+        pinfo.image = $projectAvatar.attr('href');
+        pinfo.thumbnail = $projectAvatar.find('img').attr('src');
+    }
+    return pinfo;
+}
+
 export class ProjectOverviewScrapper extends ScrapperBase {
     constructor() {
         super({
@@ -161,18 +181,11 @@ export class ProjectOverviewScrapper extends ScrapperBase {
     }
 
     public process($: CheerioStatic): ProjectOverview {
-        const project = <ProjectOverview>{};
+        let project = <ProjectOverview>{};
 
-        project.title = $('h1.project-title').text().trim();
-        project.name = $('h1.project-title a').attr('href').match(/^\/projects\/([\w-]+)$/i)[1];
+        project.base = parseProjectBasic($('.project-details-container'));
+
         project.description = parseWysiwygContent($('.project-description'));
-        project.rootCategory = $('h2.RootGameCategory a').text().trim();
-
-        const $projectAvatar = $('.project-details-container .avatar-wrapper a');
-        if ($projectAvatar.length) {
-            project.image = $projectAvatar.attr('href');
-            project.thumbnail = $projectAvatar.find('img').attr('src');
-        }
 
         // <meta property="og:description" content
 
@@ -205,8 +218,8 @@ export class ProjectOverviewScrapper extends ScrapperBase {
     }
 }
 
-// 
-// 
+//
+//
 
 export type ProjectFileItem = {
     id: number;
@@ -236,11 +249,11 @@ export class ProjectFilelistScrapper extends ScrapperBase {
     }
 }
 
-// 
-// 
+//
+//
 
 export type ProjectFile = ProjectFileItem & {
-    projectName: string;
+    base: ProjectBasicInfo;
     filename: string;
     downloads: number;
     size: string;
@@ -257,9 +270,11 @@ export class ProjectFileScrapper extends ScrapperBase {
 
     public process($: CheerioStatic) {
         const pfile = <ProjectFile>{};
+
+        pfile.base = parseProjectBasic($('.project-details-container'));
+
         pfile.title = $('.details-header h3').text().trim();
         pfile.id = Number($('.project-file-download-button-large a').attr('href').match(/^\/projects\/([\w-]+)\/files\/([0-9]+)\/download$/i)[2]);
-        pfile.projectName = $('h1.project-title a').attr('href').match(/^\/projects\/([\w-]+)$/i)[1];
         const detailsMap = parseDetails($('#content .details-info ul li'));
         pfile.filename = detailsMap.get('Filename').text().trim();
         pfile.size = detailsMap.get('Size').text().trim();
@@ -271,8 +286,50 @@ export class ProjectFileScrapper extends ScrapperBase {
     }
 }
 
-// 
-// 
+//
+//
+
+export type ProjectImageItem = {
+    label: string;
+    caption: string;
+    imageUrl: string;
+    thumbnailUrl: string;
+};
+
+export type ProjectImagePage = {
+    base: ProjectBasicInfo;
+    images: ProjectImageItem[];
+};
+
+export class ProjectImageScrapper extends ScrapperBase {
+    constructor() {
+        super({
+            pathRegex: /^\/projects\/([\w-]+)\/images$/,
+        });
+    }
+
+    public process($: CheerioStatic) {
+        const page = <ProjectImagePage>{};
+
+        page.base = parseProjectBasic($('.project-details-container'));
+        page.images = [];
+        const $items = $('.listing-attachment >li');
+        $items.each((index) => {
+            const imItem = <ProjectImageItem>{};
+            const $el = $items.eq(index);
+            imItem.label = $el.find('.project-image-title').text().trim();
+            imItem.caption = $el.find('a').attr('title');
+            imItem.imageUrl = $el.find('a').attr('href');
+            imItem.thumbnailUrl = $el.find('a img').attr('src');
+            page.images.push(imItem);
+        });
+
+        return page;
+    }
+}
+
+//
+//
 
 export type ForumPost = {
     date: Date;
@@ -308,7 +365,7 @@ export class ForumThreadScrapper extends ScrapperBase {
             categoryBreadcrumb: [],
         };
         fthread.title = $('.p-forum .caption-threads h2').text().trim();
-        
+
         const $posts = $('.p-forum .p-comment-post.forum-post');
         $posts.each((index) => {
             fthread.posts.push(parseForumPost($posts.eq(index)));

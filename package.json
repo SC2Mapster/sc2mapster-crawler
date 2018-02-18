@@ -1,6 +1,6 @@
 {
   "name": "sc2mapster-crawler",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "",
   "author": {
     "name": "Talv",
@@ -20,7 +20,8 @@
     "cheerio": "^1.0.0-rc.2",
     "crawler": "^1.1.2",
     "request": "^2.83.0",
-    "request-promise": "^4.2.2"
+    "request-promise": "^4.2.2",
+    "string-similarity": "^1.2.0"
   },
   "devDependencies": {
     "@types/cheerio": "^0.22.7",
@@ -34,6 +35,7 @@
   "scripts": {
     "clean": "rm -rf lib/*",
     "start": "ts-node src/main.ts",
+    "test": "ts-node tests/test.ts",
     "build": "tsc",
     "build:watch": "tsc --watch"
   }
