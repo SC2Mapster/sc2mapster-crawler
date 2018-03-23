@@ -36,7 +36,7 @@ export async function getProject(projectName: string) {
 }
 
 export async function getLatestProjects(rootCategory: 'maps' | 'assets', since?: Date) {
-    let items = (new ProjectListItemScrapper()).process(await get('/' + rootCategory + '?filter-sort=updated'));
+    let items = (new ProjectListItemScrapper()).process(await get('/' + rootCategory + '?filter-sort=2'));
     if (since) {
         items = items.filter((item) => {
             return item.updatedAt > since;
