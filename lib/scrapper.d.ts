@@ -1,13 +1,11 @@
 /// <reference types="cheerio" />
-export declare class ScrapperRegistry {
-}
-export declare type ScrapperOptions = {
-    pathRegex: RegExp;
+export declare type PaginationStatus = {
+    current: number;
+    total: number;
 };
-export declare abstract class ScrapperBase {
-    protected options: ScrapperOptions;
-    constructor(options: ScrapperOptions);
-    matchUrl(url: string): boolean;
+export declare enum ProjectSections {
+    Assets = "assets",
+    Maps = "maps",
 }
 export declare type WysiwygContent = {
     html: string;
@@ -17,25 +15,20 @@ export declare type WysiwygContent = {
 export declare type Member = {
     name: string;
     title: string;
+    avatarUrl?: string;
     profileThumbUrl?: string;
 };
 export declare type MemberWithRole = Member & {
     role: string;
 };
-export declare function parseEmbeddedImages($el: Cheerio): string[];
-export declare function parseWysiwygContent($el: Cheerio): WysiwygContent;
+export declare type ProjectCategory = {
+    name: string;
+    thumbnail: string;
+};
 export declare type ProjectListItem = {
     name: string;
     title: string;
     updatedAt: Date;
-};
-export declare class ProjectListItemScrapper extends ScrapperBase {
-    constructor();
-    process($: CheerioStatic): ProjectListItem[];
-}
-export declare type ProjectCategory = {
-    name: string;
-    thumbnail: string;
 };
 export declare type ProjectBasicInfo = {
     name: string;
@@ -47,6 +40,7 @@ export declare type ProjectBasicInfo = {
 export declare type ProjectOverview = {
     id: number;
     base: ProjectBasicInfo;
+    abandoned: boolean;
     categories: ProjectCategory[];
     description: WysiwygContent;
     createdAt: Date;
@@ -55,31 +49,21 @@ export declare type ProjectOverview = {
     owner: MemberWithRole;
     members: MemberWithRole[];
 };
-export declare class ProjectOverviewScrapper extends ScrapperBase {
-    constructor();
-    process($: CheerioStatic): ProjectOverview;
-}
 export declare type ProjectFileItem = {
     id: number;
     updatedAt: Date;
     title: string;
 };
-export declare class ProjectFilelistScrapper extends ScrapperBase {
-    constructor();
-    process($: CheerioStatic): ProjectFileItem[];
-}
 export declare type ProjectFile = ProjectFileItem & {
     base: ProjectBasicInfo;
     filename: string;
     downloads: number;
     size: string;
+    sizeBytes: number;
+    md5: string;
     description: WysiwygContent;
     uploadedBy: Member;
 };
-export declare class ProjectFileScrapper extends ScrapperBase {
-    constructor();
-    process($: CheerioStatic): ProjectFile;
-}
 export declare type ProjectImageItem = {
     label: string;
     caption: string;
@@ -90,10 +74,6 @@ export declare type ProjectImagePage = {
     base: ProjectBasicInfo;
     images: ProjectImageItem[];
 };
-export declare class ProjectImageScrapper extends ScrapperBase {
-    constructor();
-    process($: CheerioStatic): ProjectImagePage;
-}
 export declare type ForumPost = {
     date: Date;
     author: Member;
@@ -105,7 +85,20 @@ export declare type ForumThread = {
     posts: ForumPost[];
     categoryBreadcrumb: string[];
 };
-export declare class ForumThreadScrapper extends ScrapperBase {
-    constructor();
-    process($: CheerioStatic): ForumThread;
+export declare function parsePager($: Cheerio): PaginationStatus;
+export declare function parseEmbeddedImages($el: Cheerio): string[];
+export declare function parseWysiwygContent($el: Cheerio): WysiwygContent;
+export declare function parseProjectsList($: Cheerio): ProjectListItem[];
+export declare function parseProjectFilesList($: Cheerio): ProjectFileItem[];
+export declare function parseProjectFile($: Cheerio): ProjectFile;
+export declare function parseProjectImage($: Cheerio): ProjectImagePage;
+export declare type PaginationHandler<T> = (pageInfo: PaginationStatus, results: T[]) => boolean;
+export declare class MapsterConnection {
+    private get(p);
+    getProjectsList(section: ProjectSections, pageHandler?: PaginationHandler<ProjectListItem>): AsyncIterableIterator<ProjectListItem>;
+    getProjectOverview(projectName: string): Promise<ProjectOverview>;
+    getProjectFilesList(projectName: string): AsyncIterableIterator<ProjectFileItem>;
+    getProjectFile(projectName: string, fileId: number): Promise<ProjectFile>;
+    getProjectImages(projectName: string): Promise<ProjectImagePage>;
+    getForumThread(threadUrl: string): Promise<ForumThread>;
 }
