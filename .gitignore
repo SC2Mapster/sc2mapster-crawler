@@ -1,2 +1,5 @@
 node_modules/
 tests/
+.vscode/
+ormconfig.json
+sync.sh
