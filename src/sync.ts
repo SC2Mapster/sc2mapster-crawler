@@ -66,10 +66,10 @@ async function syncProject(projectName: string) {
     }, {
         relations: ['members', 'files', 'images']
     });
-    if (project) {
-        logger.info(`already exists`);
-        return;
-    }
+    // if (project) {
+    //     logger.info(`already exists`);
+    //     return;
+    // }
 
     // overview
     const rawOverview = await mconn.getProjectOverview(projectName);
@@ -152,7 +152,10 @@ async function syncProject(projectName: string) {
     db = await orm.createConnection();
     em = orm.getManager();
     // const r = await syncProject('starcraft-mass-recall');
-    for await (const pitem of mconn.getProjectsList(sc.ProjectSections.Maps)) {
+    for await (const pitem of mconn.getProjectsList(sc.ProjectSectionsList.maps)) {
+        await syncProject(pitem.name);
+    }
+    for await (const pitem of mconn.getProjectsList(sc.ProjectSectionsList.assets)) {
         await syncProject(pitem.name);
     }
     await db.close();

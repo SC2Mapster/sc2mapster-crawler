@@ -60,7 +60,7 @@ export class Project {
     @JoinTable()
     categories: ProjectCategory[];
 
-    @Column({
+    @Column('longtext', {
         nullable: true,
     })
     description: string;

@@ -1,16 +1,19 @@
 import * as cheerio from 'cheerio';
 import * as request from 'request-promise';
 import * as url from 'url';
+import * as puppeteer from 'puppeteer';
 
 export type PaginationStatus = {
     current: number;
     total: number;
 };
 
-export enum ProjectSections {
-    Assets = 'assets',
-    Maps = 'maps',
+export enum ProjectSectionsList {
+    assets = 'assets',
+    maps = 'maps',
 };
+
+export type ProjectSection = keyof typeof ProjectSectionsList;
 
 export type WysiwygContent = {
     html: string;
@@ -65,6 +68,7 @@ export type ProjectFileItem = {
     id: number;
     updatedAt: Date;
     title: string;
+    downladUrl: string;
 };
 
 export type ProjectFile = ProjectFileItem & {
@@ -251,9 +255,11 @@ export function parseProjectFilesList($: Cheerio): ProjectFileItem[] {
     $items.each((index, el) => {
         const pfile = <ProjectFileItem>{};
         const $el = $items.eq(index);
-        pfile.id = Number(/files\/([0-9]+)$/.exec($el.find('.project-file-name-container a').attr('href'))[1]);
+        const detailsHref = $el.find('.project-file-name-container a').attr('href');
+        pfile.id = Number(/files\/([0-9]+)$/.exec(detailsHref)[1]);
         pfile.title = $el.find('.project-file-name-container a').data('name');
         pfile.updatedAt = parseDate($el.find('.project-file-date-uploaded'));
+        pfile.downladUrl = detailsHref + '/download';
         fitems.push(pfile);
     });
     return fitems;
@@ -345,17 +351,52 @@ function parseForumThread($: Cheerio) {
 export type PaginationHandler<T> = (pageInfo: PaginationStatus, results: T[]) => boolean;
 
 export class MapsterConnection {
-    private async get(p: string) {
+    protected browser: puppeteer.Browser;
+    protected cpage: puppeteer.Page;
+
+    public async setup(browser?: puppeteer.Browser) {
+        if (!browser) {
+            browser = await puppeteer.launch({
+                headless: false,
+                args: [
+                    '--no-sandbox',
+                ],
+            });
+            this.browser = browser;
+        }
+        this.cpage = await browser.newPage();
+        await this.cpage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36');
+        await this.cpage.setJavaScriptEnabled(false);
+    }
+
+    public async close() {
+        if (this.cpage) {
+            await this.cpage.close();
+            this.cpage = void 0;
+        }
+        if (this.browser) {
+            await this.browser.close();
+            this.browser = void 0;
+        }
+    }
+
+    private async get(p: string): Promise<Cheerio> {
         console.debug(`request: ${p}`);
+        const resp = await this.cpage.goto(`https://www.sc2mapster.com${p}`);
+        if (resp.status() !== 200) {
+            throw new Error(`HTTP code: ${resp.status()}`);
+        }
+        return cheerio.load(await resp.text()).root();
         return (<CheerioStatic>await request.get('https://www.sc2mapster.com' + p, {
             transform: (body, response) => {
                 if (response.statusCode !== 200) throw new Error(`HTTP code: ${response.statusCode}`);
                 return cheerio.load(body);
             },
+            transform2xxOnly: false,
         })).root();
     };
 
-    public async *getProjectsList(section: ProjectSections, pageHandler?: PaginationHandler<ProjectListItem>) {
+    public async *getProjectsList(section: ProjectSection, pageHandler?: PaginationHandler<ProjectListItem>) {
         let cpage = 1;
         while (1) {
             const $ = await this.get(`/${section}?filter-sort=2&page=${cpage}`);
@@ -372,12 +413,14 @@ export class MapsterConnection {
         return parseProjectOverview(await this.get(`/projects/${projectName}`));
     }
 
-    public async *getProjectFilesList(projectName: string) {
+    public async *getProjectFilesList(projectName: string, pageHandler?: PaginationHandler<ProjectFileItem>) {
         let cpage = 1;
         while (1) {
             const $ = await this.get(`/projects/${projectName}/files?page=${cpage}`);
             const pageInfo = parsePager($.find('.listing-header'));
-            yield *parseProjectFilesList($);
+            const results = parseProjectFilesList($);
+            yield *results;
+            if (pageHandler && !pageHandler(pageInfo, results)) break;
             if (cpage >= pageInfo.total) break;
             ++cpage;
         }

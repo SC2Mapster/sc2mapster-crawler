@@ -1,2 +1,1 @@
-import * as scrapper from './scrapper';
-export { scrapper };
+export * from './scrapper';

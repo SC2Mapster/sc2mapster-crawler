@@ -35,7 +35,7 @@ export class ProjectFile {
     @Column()
     downloadsCount: number;
 
-    @Column({
+    @Column('text', {
         nullable: true,
     })
     description: string;
