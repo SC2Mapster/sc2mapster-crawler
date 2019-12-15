@@ -3,6 +3,8 @@ import * as request from 'request-promise';
 import * as url from 'url';
 import * as puppeteer from 'puppeteer';
 
+export const mBaseURL = 'https://www.sc2mapster.com';
+
 export type PaginationStatus = {
     current: number;
     total: number;
@@ -94,15 +96,35 @@ export type ProjectImagePage = {
     images: ProjectImageItem[];
 };
 
+export type ForumThreadBasic = {
+    threadId: number;
+    title: string;
+    directLink: string;
+    categoryBreadcrumb?: string[];
+};
+
+export type ForumThreadItem = ForumThreadBasic & {
+    createdAt: Date;
+    lastPostedAt: Date;
+    postedBy: Member;
+    pages: number;
+    replies: number;
+    views: number;
+};
+
 export type ForumPost = {
+    thread: ForumThreadBasic;
+    postNumber: number;
     date: Date;
     author: Member;
     content: WysiwygContent;
+    directLink: string;
 };
 
 export type ForumThread = {
     url: string;
     title: string;
+    directLink: string;
     posts: ForumPost[];
     categoryBreadcrumb: string[];
 };
@@ -314,12 +336,88 @@ export function parseProjectImage($: Cheerio) {
     return page;
 }
 
-function parseForumPost($: Cheerio) {
-    const post = <ForumPost>{};
+function parseForumListing($: Cheerio) {
+    const fitems: ForumThreadItem[] = [];
+    const $items = $.find('table.listing-forum-thread tr.forum-thread-row');
+    $items.each((index, el) => {
+        const pfitem = <ForumThreadItem>{};
+        const $el = $items.eq(index);
+        const $threadTitle = $el.find('.thread-title');
+        pfitem.threadId = parseInt($threadTitle.data('id'));
+        pfitem.directLink = mBaseURL + $threadTitle.data('thread-link');
+        pfitem.title = $threadTitle.find('>.title').text().trim();
+
+        const $threadAuthor = $el.find('.thread-author');
+        pfitem.createdAt = parseDate($threadAuthor.find('.thread-post-date'));
+
+        const $pagination = $el.find('ul.b-pagination');
+        if ($pagination.length) {
+            pfitem.pages = parseInt($pagination.find('.b-pagination-item:last-child a').attr('href').match(/([0-9]+)$/)[1]);
+        }
+        else {
+            pfitem.pages = 1;
+        }
+
+        const $lastpost = $el.find('.col-last-post');
+        pfitem.postedBy = <Member>{};
+        const $avatar = $lastpost.find('.avatar');
+        if ($avatar) {
+            pfitem.postedBy.profileThumbUrl = $avatar.find('img').attr('src');
+        }
+
+        const $postAuthor = $lastpost.find('.post-author');
+        pfitem.postedBy.name = $postAuthor.find('a').attr('href').match(/^\/members\/([\w-]+)$/i)[1];
+        pfitem.postedBy.title = $postAuthor.find('span').text();
+        pfitem.lastPostedAt = parseDate($lastpost.find('.post-date'));
+
+        pfitem.replies = parseInt(String($el.find('.col-count >a').data('count')).replace(',', ''));
+        pfitem.views = parseInt(String($el.find('.col-count +.col-count').data('count')).replace(',', ''));
+
+        fitems.push(pfitem);
+    });
+    return fitems;
+}
+
+function parseForumThreadBasic($: Cheerio) {
+    const bthread = <ForumThreadBasic>{
+        threadId: parseInt($.find('.forum-posts').data('id')),
+        directLink: mBaseURL + url.parse($.find('head link[rel="canonical"]').attr('href')).pathname,
+        categoryBreadcrumb: [],
+        title: $.find('.p-forum .caption-threads h2').text().trim(),
+    };
+
+    const $cbreadcrumbs = $.find('.primary-content >.b-breadcrumb ul >li:not(:last-child)');
+    $cbreadcrumbs.each((index) => {
+        if (index < 2) return;
+        bthread.categoryBreadcrumb.push($cbreadcrumbs.eq(index).find('span').text());
+    });
+
+    return bthread;
+}
+
+function parseForumPost($: Cheerio, thread: ForumThreadBasic) {
+    const post = <ForumPost>{
+        thread: thread,
+    };
     post.date = parseDate($.find('.p-comment-postdate'));
     post.content = parseWysiwygContent($.find('.forum-post-body'));
     post.author = parseMember($.find('.p-comment-user'));
+    post.postNumber = parseInt($.find('.j-comment-link').attr('href').match(/(\d+)$/)[1]);
+    post.directLink = `${thread.directLink}?comment=${post.postNumber}`;
     return post;
+}
+
+function parseForumPostList($: Cheerio) {
+    const bthread = parseForumThreadBasic($);
+    const rposts: ForumPost[] = [];
+    const $posts = $.find('.p-forum .p-comment-post.forum-post');
+    $posts.each((index) => {
+        const tmp = parseForumPost($posts.eq(index), bthread);
+        tmp.thread = bthread;
+        rposts.push(tmp);
+    });
+
+    return rposts;
 }
 
 function parseForumThread($: Cheerio) {
@@ -328,19 +426,14 @@ function parseForumThread($: Cheerio) {
         categoryBreadcrumb: [],
     };
     fthread.title = $.find('.p-forum .caption-threads h2').text().trim();
+    const bthread = parseForumThreadBasic($);
 
     const $posts = $.find('.p-forum .p-comment-post.forum-post');
     $posts.each((index) => {
-        fthread.posts.push(parseForumPost($posts.eq(index)));
+        fthread.posts.push(parseForumPost($posts.eq(index), bthread));
     });
 
-    const $cbreadcrumbs = $.find('.primary-content >.b-breadcrumb ul >li:not(:last-child)');
-    $cbreadcrumbs.each((index) => {
-        if (index < 2) return;
-        fthread.categoryBreadcrumb.push($cbreadcrumbs.eq(index).find('span').text());
-    });
-
-    // $('.b-pagination-list a:not([data-next-page])')
+    fthread.categoryBreadcrumb = bthread.categoryBreadcrumb;
 
     return fthread;
 }
@@ -349,23 +442,23 @@ function parseForumThread($: Cheerio) {
 //
 
 export type PaginationHandler<T> = (pageInfo: PaginationStatus, results: T[]) => boolean;
+export let mBrowser: puppeteer.Browser;
 
 export class MapsterConnection {
-    protected browser: puppeteer.Browser;
     protected cpage: puppeteer.Page;
 
-    public async setup(browser?: puppeteer.Browser) {
-        if (!browser) {
-            browser = await puppeteer.launch({
-                headless: false,
+    public async setup() {
+        if (!mBrowser) {
+            mBrowser = await puppeteer.launch({
+                headless: true,
                 args: [
                     '--no-sandbox',
                 ],
             });
-            this.browser = browser;
         }
-        this.cpage = await browser.newPage();
+        this.cpage = await mBrowser.newPage();
         await this.cpage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36');
+        await this.cpage.setExtraHTTPHeaders({'Accept-Language': 'en-US,en;q=0.9'});
         await this.cpage.setJavaScriptEnabled(false);
     }
 
@@ -374,20 +467,24 @@ export class MapsterConnection {
             await this.cpage.close();
             this.cpage = void 0;
         }
-        if (this.browser) {
-            await this.browser.close();
-            this.browser = void 0;
+        if (!(await mBrowser.pages()).length) {
+            await mBrowser.close();
+            mBrowser = void 0;
         }
     }
 
     private async get(p: string): Promise<Cheerio> {
-        console.debug(`request: ${p}`);
-        const resp = await this.cpage.goto(`https://www.sc2mapster.com${p}`);
+        if (p.startsWith('/')) {
+            p = mBaseURL + p;
+        }
+        const resp = await this.cpage.goto(p, {
+            waitUntil: 'domcontentloaded',
+        });
         if (resp.status() !== 200) {
             throw new Error(`HTTP code: ${resp.status()}`);
         }
         return cheerio.load(await resp.text()).root();
-        return (<CheerioStatic>await request.get('https://www.sc2mapster.com' + p, {
+        return (<CheerioStatic>await request.get(p, {
             transform: (body, response) => {
                 if (response.statusCode !== 200) throw new Error(`HTTP code: ${response.statusCode}`);
                 return cheerio.load(body);
@@ -434,8 +531,41 @@ export class MapsterConnection {
         return parseProjectImage(await this.get(`/projects/${projectName}/images`));
     }
 
-    public async getForumThread(threadUrl: string) {
-        const uinfo = url.parse(threadUrl);
-        return parseForumThread(await this.get(uinfo.path));
+    public async getForumRecent() {
+        return parseForumListing(await this.get(`/new-content?filter-prefix=&filter-thread-search=&filter-date-range-type=3&filter-association-type=1`));
+    }
+
+    public async getForumThread(cpath: string) {
+        if (!cpath.startsWith('/') && !cpath.match(/^https?:\/\/.*/)) {
+            cpath = `/forums/${cpath}`;
+        }
+
+        return parseForumThread(await this.get(`${cpath}`));
+    }
+
+    public async *getForumPostList(cpath: string, pageHandler?: PaginationHandler<ForumPost>, opts?: { pFrom: number, pTo: number }) {
+        let cpage = 1;
+        let pmod = 1;
+        if (opts) {
+            cpage = opts.pFrom;
+            pmod = opts.pTo < opts.pFrom ? -1 : 1;
+        }
+
+        if (!cpath.startsWith('/') && !cpath.match(/^https?:\/\/.*/)) {
+            cpath = `/forums/${cpath}`;
+        }
+
+        while (1) {
+            const $ = await this.get(`${cpath}?page=${cpage}`);
+            const pageInfo = parsePager($.find('.listing-header'));
+            let results = parseForumPostList($);
+            if (pmod === -1) {
+                results = results.reverse();
+            }
+            yield *results;
+            if (pageHandler && !pageHandler(pageInfo, results)) break;
+            if ((cpage >= pageInfo.total && pmod === 1) || (cpage <= 1 && pmod === -1)) break;
+            cpage += pmod;
+        }
     }
 }
