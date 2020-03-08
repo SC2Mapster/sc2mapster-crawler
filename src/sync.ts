@@ -13,7 +13,10 @@ import { ProjectCategory } from './entity/ProjectCategory';
 export const logger = winston.createLogger({
     level: 'debug',
     format: winston.format.combine(
-        winston.format.timestamp({}),
+        winston.format.timestamp({
+            alias: 'time',
+            format: 'HH:mm:ss.SSS',
+        }),
         winston.format.colorize(),
         winston.format.splat(),
         winston.format.simple(),
@@ -58,31 +61,33 @@ async function syncProjectCategory(pcategory: sc.ProjectCategory) {
     return cat;
 }
 
-async function syncProject(projectName: string) {
-    logger.info(`syncing project '${projectName}'`);
+async function syncProject(projItem: sc.ProjectListItem) {
+    logger.info(`syncing project '${projItem.name}'`);
 
     let project = await em.getRepository(Project).findOne({
-        name: projectName,
-    }, {
-        relations: ['members', 'files', 'images']
+        name: projItem.name,
     });
-    // if (project) {
-    //     logger.info(`already exists`);
-    //     return;
-    // }
+
+    if (project) {
+        if (project.updatedAt >= projItem.updatedAt) {
+            logger.info(`up to date`);
+            return;
+        }
+        else {
+            logger.info(`Last updated: ${project.updatedAt} ; current = ${projItem.updatedAt}`);
+        }
+    }
 
     // overview
-    const rawOverview = await mconn.getProjectOverview(projectName);
+    const rawOverview = await mconn.getProjectOverview(projItem.name);
+
     if (!project) {
         project = new Project();
         project.name = rawOverview.base.name;
         project.createdAt = rawOverview.createdAt;
         project.categories = [];
-        project.members = [];
-        project.files = [];
-        project.images = [];
     }
-    project.updatedAt = rawOverview.updatedAt;
+    project.updatedAt = rawOverview.createdAt;
     project.title = rawOverview.base.title;
     project.section = rawOverview.base.rootCategory;
     project.thumbUrl = rawOverview.base.thumbnail;
@@ -99,40 +104,40 @@ async function syncProject(projectName: string) {
     await em.save(project);
 
     // members
+    await em.getRepository(ProjectMember).delete({ project: project });
     for (const rawMember of rawOverview.members) {
-        if (project.members.find(item => item.user.username === rawMember.name)) continue;
         logger.debug(`processing member ${rawMember.name}`);
         let member = new ProjectMember()
         member.user = await syncUser(rawMember);
         member.role = rawMember.role;
         member.project = project;
-        project.members.push(member);
         await em.save(member);
     }
 
     // files
-    for await (const rpItem of await mconn.getProjectFilesList(projectName)) {
-        if (project.files.find(item => item.originalId === rpItem.id)) continue;
+    await em.getRepository(ProjectFile).delete({ project: project });
+    for await (const rpItem of mconn.getProjectFilesList(projItem.name)) {
         logger.debug(`processing file ${rpItem.title} (${rpItem.id})`);
-        const rfullItem = await mconn.getProjectFile(projectName, rpItem.id);
+        const rfullItem = await mconn.getProjectFile(projItem.name, rpItem.id);
 
         let projectFile = new ProjectFile();
         projectFile.originalId = rfullItem.id;
         projectFile.createdAt = rfullItem.updatedAt;
         projectFile.filename = rfullItem.filename;
+        projectFile.downloadUrl = rfullItem.downloadUrl;
+        projectFile.cdnUrl = rfullItem.cdnUrl;
         projectFile.md5 = rfullItem.md5;
         projectFile.downloadsCount = rfullItem.downloads;
         projectFile.description = rfullItem.description.html;
         projectFile.size = rfullItem.sizeBytes;
         projectFile.uploader = await syncUser(rfullItem.uploadedBy);
         projectFile.project = project;
-        project.files.push(projectFile);
         await em.save(projectFile);
     }
 
     // images
-    for (const rwImage of (await mconn.getProjectImages(projectName)).images) {
-        if (project.images.find(item => item.imageUrl === rwImage.imageUrl)) continue;
+    await em.getRepository(ProjectImage).delete({ project: project });
+    for (const rwImage of (await mconn.getProjectImages(projItem.name)).images) {
         logger.debug(`processing image ${rwImage.label}`);
         let image = new ProjectImage();
         image.label = rwImage.label;
@@ -140,23 +145,33 @@ async function syncProject(projectName: string) {
         image.thumbUrl = rwImage.thumbnailUrl;
         image.imageUrl = rwImage.imageUrl;
         image.project = project;
-        project.images.push(image);
         await em.save(image);
     }
 
+    project.updatedAt = rawOverview.updatedAt;
     await em.save(project);
 }
 
+process.on('unhandledRejection', e => { throw e; });
 (async function() {
+    logger.debug('Setting up browser');
+    await mconn.setup({ logger: logger });
+
     logger.debug('Connecting to DB..');
     db = await orm.createConnection();
     em = orm.getManager();
-    // const r = await syncProject('starcraft-mass-recall');
-    for await (const pitem of mconn.getProjectsList(sc.ProjectSectionsList.maps)) {
-        await syncProject(pitem.name);
+
+    const pageReporter: sc.PaginationHandler<sc.ProjectListItem> = (pageInfo, results) => {
+        logger.info(`Page [${pageInfo.current.toString().padEnd(3)}/${pageInfo.total.toString().padEnd(3)}]`);
+        return true;
     }
-    for await (const pitem of mconn.getProjectsList(sc.ProjectSectionsList.assets)) {
-        await syncProject(pitem.name);
+
+    for await (const pitem of mconn.getProjectsList(sc.ProjectSectionsList.maps, pageReporter)) {
+        await syncProject(pitem);
     }
+    for await (const pitem of mconn.getProjectsList(sc.ProjectSectionsList.assets, pageReporter)) {
+        await syncProject(pitem);
+    }
+
     await db.close();
 })();

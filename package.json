@@ -1,6 +1,6 @@
 {
   "name": "sc2mapster-crawler",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "",
   "author": {
     "name": "Talv",
@@ -18,17 +18,12 @@
   "types": "lib/src/main.d.ts",
   "dependencies": {
     "cheerio": "^1.0.0-rc.3",
-    "mysql": "^2.15.0",
     "puppeteer": "^2.0.0",
     "puppeteer-extra": "^3.1.7",
     "puppeteer-extra-plugin-recaptcha": "^3.1.8",
     "puppeteer-extra-plugin-stealth": "^2.4.5",
-    "reflect-metadata": "^0.1.12",
     "request": "^2.87.0",
     "request-promise-native": "^1.0.8",
-    "string-similarity": "^1.2.0",
-    "sugar": "^2.0.4",
-    "typeorm": "^0.2.7",
     "winston": "^3.2.1"
   },
   "devDependencies": {
@@ -37,8 +32,12 @@
     "@types/puppeteer": "^2.0.0",
     "@types/request": "^2.47.0",
     "@types/request-promise-native": "^1.0.17",
+    "mysql": "^2.15.0",
+    "reflect-metadata": "^0.1.12",
     "source-map-support": "^0.5.16",
+    "sugar": "^2.0.4",
     "ts-node": "^8.5.4",
+    "typeorm": "^0.2.7",
     "typescript": "^3.7.3"
   },
   "scripts": {

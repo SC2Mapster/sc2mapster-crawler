@@ -1,6 +1,6 @@
 import * as util from 'util';
 import * as cheerio from 'cheerio';
-import * as request from 'request-promise-native';
+import * as fs from 'fs';
 import * as url from 'url';
 import * as winston from 'winston';
 import puppeteer from 'puppeteer';
@@ -75,7 +75,7 @@ export type ProjectFileItem = {
     id: number;
     updatedAt: Date;
     title: string;
-    downladUrl: string;
+    downloadUrl: string;
 };
 
 export type ProjectFile = ProjectFileItem & {
@@ -85,6 +85,7 @@ export type ProjectFile = ProjectFileItem & {
     size: string;
     sizeBytes: number;
     md5: string;
+    cdnUrl: string;
     description: WysiwygContent;
     uploadedBy: Member;
 };
@@ -286,7 +287,7 @@ export function parseProjectFilesList($: Cheerio): ProjectFileItem[] {
         pfile.id = Number(/files\/([0-9]+)$/.exec(detailsHref)[1]);
         pfile.title = $el.find('.project-file-name-container a').data('name');
         pfile.updatedAt = parseDate($el.find('.project-file-date-uploaded'));
-        pfile.downladUrl = detailsHref + '/download';
+        pfile.downloadUrl = detailsHref + '/download';
         fitems.push(pfile);
     });
     return fitems;
@@ -298,7 +299,9 @@ export function parseProjectFile($: Cheerio) {
     pfile.base = parseProjectBasic($.find('.project-details-container'));
 
     pfile.title = $.find('.details-header h3').text().trim();
-    pfile.id = Number($.find('.project-file-download-button-large a').attr('href').match(/^\/projects\/([\w-]+)\/files\/([0-9]+)\/download$/i)[2]);
+    const dlhref = $.find('.project-file-download-button-large a').attr('href');
+    pfile.id = Number(dlhref.match(/^\/projects\/([\w-]+)\/files\/([0-9]+)\/download$/i)[2]);
+    pfile.downloadUrl = dlhref;
     const detailsMap = parseDetails($.find('#content .details-info ul li'));
     pfile.filename = detailsMap.get('Filename').text().trim();
     pfile.size = detailsMap.get('Size').text().trim();
@@ -315,6 +318,8 @@ export function parseProjectFile($: Cheerio) {
         pfile.sizeBytes = 0;
     }
     pfile.md5 = detailsMap.get('MD5').text().trim();
+    const idstr = pfile.id.toString();
+    pfile.cdnUrl = `https://edge.forgecdn.net/files/${idstr.substr(0, Math.ceil(idstr.length / 2.0))}/${idstr.substr(Math.ceil(idstr.length / 2.0))}/${pfile.filename}`;
     pfile.downloads = Number(detailsMap.get('Downloads').text().replace(/,/g, '').trim());
     pfile.updatedAt = parseDate(detailsMap.get('Uploaded'));
     pfile.uploadedBy = parseMember(detailsMap.get('Uploaded by').find('.user-tag'));
@@ -449,6 +454,7 @@ function parseForumThread($: Cheerio) {
 export interface MapsterConnOpts {
     captcha2Token?: string;
     logger?: winston.Logger;
+    userAgent?: string;
 };
 
 export type PaginationHandler<T> = (pageInfo: PaginationStatus, results: T[]) => boolean;
@@ -472,21 +478,20 @@ export class MapsterConnection {
                 format: winston.format.combine(
                     winston.format.timestamp({
                         alias: 'time',
-                        format: 'hh:mm:ss.SSS',
+                        format: 'HH:mm:ss.SSS',
                     }),
-                    winston.format.ms(),
                     winston.format.prettyPrint({ colorize: false, depth: 2 }),
                     winston.format.printf(info => {
                         const out = [
-                            `${info.time} ${info.level.substr(0, 3).toUpperCase()} ${info.message} ${info.ms}`
+                            `${info.time} ${info.level.toUpperCase().padEnd(8)} ${info.message}`
                         ];
 
                         const splat: any[] = info[<any>Symbol.for('splat')];
                         if (Array.isArray(splat)) {
                             const dump = splat.length === 1 ? splat.pop() : splat;
                             out.push(util.inspect(dump, {
-                                colors: false,
-                                depth: 3,
+                                colors: true,
+                                depth: 2,
                                 compact: true,
                                 maxArrayLength: 500,
                                 breakLength: 140,
@@ -503,23 +508,32 @@ export class MapsterConnection {
         }
 
         if (!mBrowser) {
-            puppeteerExtra
+            const pExtra = puppeteerExtra
                 .use(StealthPlugin())
                 .use(RecaptchaPlugin({
                     provider: { id: '2captcha', token: opts.captcha2Token },
                     visualFeedback: true // colorize reCAPTCHAs (violet = detected, green = solved)
                 }))
             ;
-            mBrowser = await puppeteerExtra.launch({
+
+            if (!fs.existsSync('./pupdata')) {
+                fs.mkdirSync('./pupdata', 0o700);
+            }
+
+            mBrowser = await pExtra.launch({
                 headless: true,
-                executablePath: 'chromium',
-                userDataDir: `${require('os').homedir()}/.config/chromium`,
+                // executablePath: 'chromium',
+                userDataDir: `${process.cwd()}/.pupdata`,
                 args: [
-                    '--no-sandbox',
-                    // `--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`,
-                    // `--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/73.0.3683.86 HeadlessChrome/73.0.3683.86 Safari/537.36`,
-                    `--homepage 'about:blank'`,
+                    `--no-sandbox`,
+                    `--no-default-browser-check`,
+                    `--window-size=1280,800`,
+                    `--user-agent=${opts.userAgent ?? 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:73.0) Gecko/20100101 Firefox/73.0'}`,
                 ],
+                ignoreDefaultArgs: [
+                    `--enable-automation`,
+                ],
+                // dumpio: true,
             });
 
             const bPages = await mBrowser.pages();
@@ -532,16 +546,21 @@ export class MapsterConnection {
             this.cpage = await mBrowser.newPage();
         }
         await this.cpage.setExtraHTTPHeaders({'Accept-Language': 'en-US,en;q=0.9'});
+        await this.cpage.setCacheEnabled(false);
     }
 
     public async close() {
-        if (this.cpage) {
-            await this.cpage.close();
+        const pnum = (await mBrowser.pages()).length;
+        if (this.cpage && pnum > 1) {
+            this.logger.info(`closing page #${pnum}`);
+            await this.cpage.close({ runBeforeUnload: true });
             this.cpage = void 0;
         }
-        if (!(await mBrowser.pages()).length) {
+        if (pnum <= 1) {
+            this.logger.info('closing browser');
             await mBrowser.close();
             mBrowser = void 0;
+            this.cpage = void 0;
         }
     }
 
@@ -549,27 +568,29 @@ export class MapsterConnection {
         if (p.startsWith('/')) {
             p = mBaseURL + p;
         }
-        await this.cpage.setJavaScriptEnabled(false);
+        // await this.cpage.setJavaScriptEnabled(false);
 
-        this.logger.debug(`goto: ${p}`);
+        this.logger.debug(`### GOTO: ${p}`);
+        this.logger.debug('cookies for sc2mapster', JSON.stringify((await this.cpage.cookies(mBaseURL))));
         const resp = await this.cpage.goto(p, {
-            waitUntil: 'domcontentloaded',
+            waitUntil: 'networkidle2',
         });
+        this.logger.debug('req headers', resp.request().headers());
         const text = await resp.text();
+        this.logger.debug('resp headers', resp.headers());
 
         if (resp.status() !== 200) {
             if (resp.status() === 403 && text.search('<meta name="captcha-bypass" id="captcha-bypass" />') !== -1) {
                 this.logger.debug('Got captcha to solve..');
-                await this.cpage.setJavaScriptEnabled(true);
+                // await this.cpage.setJavaScriptEnabled(true);
                 await this.cpage.reload();
                 this.logger.debug('Solving..');
                 const cr = await this.cpage.solveRecaptchas();
-                this.logger.debug('Captcha result', cr);
+                this.logger.debug('Captcha result', cr?.solutions);
                 if (cr.error) {
                     throw new Error(`Failed to resolve captcha`);
                 }
-
-                await this.cpage.waitForNavigation({ waitUntil: 'load' });
+                await this.cpage.waitForNavigation();
             }
             else {
                 throw new Error(`HTTP code: ${resp.status()}`);

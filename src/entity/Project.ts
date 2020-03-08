@@ -20,13 +20,19 @@ export class Project {
     @JoinColumn()
     owner: User;
 
-    @OneToMany(type => ProjectMember, member => member.project)
+    @OneToMany(type => ProjectMember, member => member.project, {
+        eager: false,
+    })
     members: ProjectMember[];
 
-    @OneToMany(type => ProjectFile, file => file.project)
+    @OneToMany(type => ProjectFile, file => file.project, {
+        eager: false,
+    })
     files: ProjectFile[];
 
-    @OneToMany(type => ProjectImage, image => image.project)
+    @OneToMany(type => ProjectImage, image => image.project, {
+        eager: false,
+    })
     images: ProjectImage[];
 
     @Column({

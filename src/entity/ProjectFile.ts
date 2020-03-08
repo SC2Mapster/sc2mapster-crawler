@@ -27,6 +27,12 @@ export class ProjectFile {
     filename: string;
 
     @Column()
+    downloadUrl: string;
+
+    @Column()
+    cdnUrl: string;
+
+    @Column()
     md5: string;
 
     @Column()

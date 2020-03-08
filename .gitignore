@@ -2,6 +2,7 @@ node_modules/
 lib/
 tests/
 .vscode/
+.pupdata/
 ormconfig.json
 sync.sh
 NOTES.md

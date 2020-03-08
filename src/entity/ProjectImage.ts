@@ -13,7 +13,9 @@ export class ProjectImage {
     @Column()
     label: string;
 
-    @Column()
+    @Column({
+        type: 'text',
+    })
     caption: string;
 
     @Column()
