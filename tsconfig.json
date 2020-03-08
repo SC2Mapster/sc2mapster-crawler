@@ -12,6 +12,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "sourceMap": true,
+    "esModuleInterop": true,
     "lib": [
       "es2017",
       "dom",

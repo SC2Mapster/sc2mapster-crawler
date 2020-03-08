@@ -1,7 +1,12 @@
+import * as util from 'util';
 import * as cheerio from 'cheerio';
-import * as request from 'request-promise';
+import * as request from 'request-promise-native';
 import * as url from 'url';
-import * as puppeteer from 'puppeteer';
+import * as winston from 'winston';
+import puppeteer from 'puppeteer';
+import puppeteerExtra from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import RecaptchaPlugin from 'puppeteer-extra-plugin-recaptcha';
 
 export const mBaseURL = 'https://www.sc2mapster.com';
 
@@ -15,7 +20,7 @@ export enum ProjectSectionsList {
     maps = 'maps',
 };
 
-export type ProjectSection = keyof typeof ProjectSectionsList;
+export type ProjectSection = keyof typeof ProjectSectionsList | string[];
 
 export type WysiwygContent = {
     html: string;
@@ -441,25 +446,92 @@ function parseForumThread($: Cheerio) {
 //
 //
 
+export interface MapsterConnOpts {
+    captcha2Token?: string;
+    logger?: winston.Logger;
+};
+
 export type PaginationHandler<T> = (pageInfo: PaginationStatus, results: T[]) => boolean;
 export let mBrowser: puppeteer.Browser;
 
 export class MapsterConnection {
     protected cpage: puppeteer.Page;
+    protected logger: winston.Logger;
 
-    public async setup() {
-        if (!mBrowser) {
-            mBrowser = await puppeteer.launch({
-                headless: true,
-                args: [
-                    '--no-sandbox',
+    public async setup(opts?: MapsterConnOpts) {
+        opts = Object.assign<MapsterConnOpts, MapsterConnOpts>({
+            captcha2Token: '',
+        }, opts);
+
+        if (opts.logger) {
+            this.logger = opts.logger;
+        }
+        else {
+            this.logger = winston.createLogger({
+                level: 'debug',
+                format: winston.format.combine(
+                    winston.format.timestamp({
+                        alias: 'time',
+                        format: 'hh:mm:ss.SSS',
+                    }),
+                    winston.format.ms(),
+                    winston.format.prettyPrint({ colorize: false, depth: 2 }),
+                    winston.format.printf(info => {
+                        const out = [
+                            `${info.time} ${info.level.substr(0, 3).toUpperCase()} ${info.message} ${info.ms}`
+                        ];
+
+                        const splat: any[] = info[<any>Symbol.for('splat')];
+                        if (Array.isArray(splat)) {
+                            const dump = splat.length === 1 ? splat.pop() : splat;
+                            out.push(util.inspect(dump, {
+                                colors: false,
+                                depth: 3,
+                                compact: true,
+                                maxArrayLength: 500,
+                                breakLength: 140,
+                            }));
+                        }
+
+                        return out.join('\n');
+                    }),
+                ),
+                transports: [
+                    new winston.transports.Console(),
                 ],
             });
         }
-        this.cpage = await mBrowser.newPage();
-        await this.cpage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36');
+
+        if (!mBrowser) {
+            puppeteerExtra
+                .use(StealthPlugin())
+                .use(RecaptchaPlugin({
+                    provider: { id: '2captcha', token: opts.captcha2Token },
+                    visualFeedback: true // colorize reCAPTCHAs (violet = detected, green = solved)
+                }))
+            ;
+            mBrowser = await puppeteerExtra.launch({
+                headless: true,
+                executablePath: 'chromium',
+                userDataDir: `${require('os').homedir()}/.config/chromium`,
+                args: [
+                    '--no-sandbox',
+                    // `--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`,
+                    // `--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/73.0.3683.86 HeadlessChrome/73.0.3683.86 Safari/537.36`,
+                    `--homepage 'about:blank'`,
+                ],
+            });
+
+            const bPages = await mBrowser.pages();
+            if (bPages.length) {
+                this.cpage = bPages[0];
+            }
+        }
+
+        if (!this.cpage) {
+            this.cpage = await mBrowser.newPage();
+        }
         await this.cpage.setExtraHTTPHeaders({'Accept-Language': 'en-US,en;q=0.9'});
-        await this.cpage.setJavaScriptEnabled(false);
     }
 
     public async close() {
@@ -477,26 +549,52 @@ export class MapsterConnection {
         if (p.startsWith('/')) {
             p = mBaseURL + p;
         }
+        await this.cpage.setJavaScriptEnabled(false);
+
+        this.logger.debug(`goto: ${p}`);
         const resp = await this.cpage.goto(p, {
             waitUntil: 'domcontentloaded',
         });
+        const text = await resp.text();
+
         if (resp.status() !== 200) {
-            throw new Error(`HTTP code: ${resp.status()}`);
+            if (resp.status() === 403 && text.search('<meta name="captcha-bypass" id="captcha-bypass" />') !== -1) {
+                this.logger.debug('Got captcha to solve..');
+                await this.cpage.setJavaScriptEnabled(true);
+                await this.cpage.reload();
+                this.logger.debug('Solving..');
+                const cr = await this.cpage.solveRecaptchas();
+                this.logger.debug('Captcha result', cr);
+                if (cr.error) {
+                    throw new Error(`Failed to resolve captcha`);
+                }
+
+                await this.cpage.waitForNavigation({ waitUntil: 'load' });
+            }
+            else {
+                throw new Error(`HTTP code: ${resp.status()}`);
+            }
         }
-        return cheerio.load(await resp.text()).root();
-        return (<CheerioStatic>await request.get(p, {
-            transform: (body, response) => {
-                if (response.statusCode !== 200) throw new Error(`HTTP code: ${response.statusCode}`);
-                return cheerio.load(body);
-            },
-            transform2xxOnly: false,
-        })).root();
+
+        this.logger.debug('loaded', {
+            title: await this.cpage.title(),
+            url: this.cpage.url(),
+        });
+        return cheerio.load(await this.cpage.content()).root();
     };
 
     public async *getProjectsList(section: ProjectSection, pageHandler?: PaginationHandler<ProjectListItem>) {
+        let spath: string;
+        if (Array.isArray(section)) {
+            spath = section.join('/');
+        }
+        else {
+            spath = section;
+        }
+
         let cpage = 1;
         while (1) {
-            const $ = await this.get(`/${section}?filter-sort=2&page=${cpage}`);
+            const $ = await this.get(`/${spath}?filter-sort=2&page=${cpage}`);
             const pageInfo = parsePager($.find('.listing-header'));
             const results = parseProjectsList($);
             yield *results;
