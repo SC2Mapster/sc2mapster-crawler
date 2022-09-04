@@ -516,14 +516,12 @@ export class MapsterConnection {
                 }))
             ;
 
-            if (!fs.existsSync('./pupdata')) {
-                fs.mkdirSync('./pupdata', 0o700);
-            }
+            const pupUserDir = process.env.APP_PUPPETEER_DATA_DIR ?? './puppeteer';
 
             mBrowser = await pExtra.launch({
                 headless: true,
                 // executablePath: 'chromium',
-                userDataDir: `${process.cwd()}/.pupdata`,
+                userDataDir: pupUserDir,
                 args: [
                     `--no-sandbox`,
                     `--no-default-browser-check`,
@@ -573,7 +571,7 @@ export class MapsterConnection {
         this.logger.debug(`### GOTO: ${p}`);
         this.logger.debug('cookies for sc2mapster', JSON.stringify((await this.cpage.cookies(mBaseURL))));
         const resp = await this.cpage.goto(p, {
-            waitUntil: 'networkidle2',
+            waitUntil: 'domcontentloaded',
         });
         this.logger.debug('req headers', resp.request().headers());
         const text = await resp.text();

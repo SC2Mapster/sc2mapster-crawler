@@ -2,7 +2,7 @@ node_modules/
 lib/
 tests/
 .vscode/
-.pupdata/
+puppeteer/
 ormconfig.json
 sync.sh
 NOTES.md

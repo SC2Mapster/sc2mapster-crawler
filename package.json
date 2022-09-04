@@ -44,7 +44,7 @@
     "clean": "rm -rf lib/*",
     "sync": "ts-node src/sync.ts",
     "test": "ts-node tests/test.ts",
-    "build": "tsc -p .",
+    "build": "rm -rf lib/* && tsc -p .",
     "build:watch": "tsc -p . -w",
     "typeorm": "ts-node ./node_modules/.bin/typeorm"
   }
